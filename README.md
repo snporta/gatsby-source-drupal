@@ -1,3 +1,11 @@
+# Fork Alert!
+
+This is a fork of the original project which is part of the GatsbyJS mono repo. This allows us to more easily maintain the changes we're using in production while working on getting them incorporated upstream. Eventually we can hopefully stop using this fork and go back to using the official GatsbyJS version of the plugin.
+
+Current open/related issues:
+
+- https://github.com/gatsbyjs/gatsby/pull/5020ZZ
+
 # gatsby-source-drupal
 
 Source plugin for pulling data (including images) into Gatsby from Drupal sites.
