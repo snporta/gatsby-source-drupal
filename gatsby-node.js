@@ -258,9 +258,7 @@ exports.sourceNodes = async ({
 
         try {
           d = await axios.get(url, {
-            headers: {
-              Authorization: 'Basic YWRtaW46YWRtaW4zNTc='
-            },
+            headers,
             params
           });
         } catch (error) {
