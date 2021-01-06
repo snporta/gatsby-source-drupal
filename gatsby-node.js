@@ -135,9 +135,7 @@ exports.sourceNodes = async ({
     try {
       // Hit fastbuilds endpoint with the lastFetched date.
       const data = await axios.get(`${baseUrl}/gatsby-fastbuilds/sync/${lastFetched}`, {
-        headers: {
-          Authorization: 'Basic YWRtaW46YWRtaW4zNTc='
-        },
+        headers,
         params
       });
 
@@ -202,7 +200,6 @@ exports.sourceNodes = async ({
     drupalFetchIncrementalActivity.end();
 
     if (!requireFullRebuild) {
-      console.log("NOT REIMPORTING");
       return;
     }
   }
@@ -222,31 +219,28 @@ exports.sourceNodes = async ({
   let allData;
 
   try {
-    
-    
     const data = await axios.get(`${baseUrl}/${apiBase}`, {
-      headers: {
-        Authorization: 'Basic YWRtaW46YWRtaW4zNTc='
-      },
+      headers,
       params
     });
-    console.log("DATA");
-    console.log(data);
-    let round = 0;
+    let round = [];
+    let roundM = 0;
     allData = await Promise.all(_.map(data.data.links, async (url, type) => {
-      await new Promise(resolve => setTimeout(resolve, Math.random()*10000));
+      roundM++;
+      await new Promise(resolve => setTimeout(resolve, roundM*2000));
       if (disallowedLinkTypes.includes(type)) return;
       if (!url) return;
       if (!type) return;
-      console.log('url to proccess: ', url);
-      //if (!url.href.includes('address')) return;
+      console.log("correr: ", url);
+      if (!round[url.href]) {
+        round[url.href] = 0;
+      }
       
-     /*  if (!(url.href.includes('address') || url.href.includes('taxonomy') || url.href.includes('survey') || url.href.includes('working') || url.href.includes('place') || url.href.includes('pro'))) {
-return;
-      }*/
-
       const getNext = async (url, data = []) => {
-        round++;
+        let urlAux = url.href.split("?")[0];
+        console.log("url splitted is: ", urlAux);
+        console.log("la vuelta es: ", round[urlAux]);
+        round[urlAux]++;
         if (typeof url === `object`) {
           // url can be string or object containing href field
           url = url.href; // Apply any filters configured in gatsby-config.js. Filters
@@ -263,7 +257,6 @@ return;
         let d;
 
         try {
-          console.log("consumiendo: ", url);
           d = await axios.get(url, {
             headers: {
               Authorization: 'Basic YWRtaW46YWRtaW4zNTc='
@@ -280,23 +273,22 @@ return;
             throw error;
           }
         }
-       // console.log("data endpoint:");
-        //console.log(d);
-        
+       
         data = data.concat(d.data.data); // Add support for includes. Includes allow entity data to be expanded
         // based on relationships. The expanded data is exposed as `included`
         // in the JSON API response.
         // See https://www.drupal.org/docs/8/modules/jsonapi/includes
-
+        //console.log("imported data is");
+        //console.log(data);
         if (d.data.included) {
           data = data.concat(d.data.included);
         }
 
-
-        // WALDEMAR: esto lo comente para que solo traiga los primeros 30 items de cada tipo.. (si no hay que esperar mucho y sufrimos 540 gateway error.)
-        console.log("incrementando: ", round);
-        if (d.data.links && d.data.links.next ) { // && round % 1000 != 0
-        //  data = await getNext(d.data.links.next, data);
+        if (d.data.links && d.data.links.next && round[urlAux] < 2) {
+          //round++;
+          console.log("fetching", d.data.links.next);
+          await new Promise(resolve2 => setTimeout(resolve2, 700));
+          data = await getNext(d.data.links.next, data);
         }
 
         return data;
