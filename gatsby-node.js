@@ -4,6 +4,8 @@ const axios = require(`axios`);
 
 const _ = require(`lodash`);
 
+var fs = require('fs');
+
 const {
   nodeFromData,
   downloadFile,
@@ -57,7 +59,9 @@ exports.sourceNodes = async ({
     concurrentFileRequests,
     disallowedLinkTypes,
     skipFileDownloads,
-    fastBuilds
+    fastBuilds,
+    fetchDrupalFromCache,
+    demoImport,
   } = pluginOptions;
   const {
     createNode,
@@ -123,9 +127,12 @@ exports.sourceNodes = async ({
   }
 
   fastBuilds = fastBuilds || false;
+  fetchDrupalFromCache = fetchDrupalFromCache || false;
+  demoImport = demoImport || false;
 
   if (fastBuilds) {
     var _store$getState$statu, _store$getState$statu2, _store$getState$statu3;
+
 
     let lastFetched = (_store$getState$statu = (_store$getState$statu2 = store.getState().status.plugins) === null || _store$getState$statu2 === void 0 ? void 0 : (_store$getState$statu3 = _store$getState$statu2[`gatsby-source-drupal`]) === null || _store$getState$statu3 === void 0 ? void 0 : _store$getState$statu3.lastFetched) !== null && _store$getState$statu !== void 0 ? _store$getState$statu : 0;
     const drupalFetchIncrementalActivity = reporter.activityTimer(`Fetch incremental changes from Drupal`);
@@ -158,11 +165,35 @@ exports.sourceNodes = async ({
 
         let nodesToSync = data.data.entities;
 
+        const fileContentData = fs.readFileSync('./allData.txt');
+        const arrayElements = JSON.parse(fileContentData);
+
         for (const nodeSyncData of nodesToSync) {
           if (nodeSyncData.action === `delete`) {
+            console.log("node to delete: ", nodeSyncData.id);
+            console.log("nodeSyncData", nodeSyncData);
             actions.deleteNode({
               node: getNode(createNodeId(nodeSyncData.id))
             });
+
+
+            let done = false;
+            for (let i = 0; i < arrayElements.length; i++) {
+              let dataElements = arrayElements[i];
+              if (dataElements && dataElements.data) {
+                for (let j = 0; j < dataElements.data.length; j++) {
+                  if (dataElements.data[j].id === nodeSyncData.id) {
+                    dataElements.data.splice(j, 1);
+                    done = true;
+                    break;
+                  }
+                }
+              }
+              if (done) {
+                break;
+              }
+            }
+
           } else {
             // The data could be a single Drupal entity or an array of Drupal
             // entities to update.
@@ -173,6 +204,38 @@ exports.sourceNodes = async ({
             }
 
             for (const nodeToUpdate of nodesToUpdate) {
+
+
+
+              let done = false;
+              for (let i = 0; i < arrayElements.length; i++) {
+                let dataElements = arrayElements[i];
+                if (dataElements && dataElements.type === nodeToUpdate.type) {
+                  if (dataElements.data) {
+                    for (let j = 0; j < dataElements.data.length; j++) {
+                      if (dataElements.data[j].id === nodeToUpdate.id) {
+                        dataElements.data[j] = nodeToUpdate;
+                        done = true;
+                        break;
+                      }
+                    }
+                    if (done) {
+                      break;
+                    } else {
+                      // insert element becuase it is an insert action. (not an update.)
+                      if (!dataElements.data) {
+                        dataElements.data = [];
+                      }
+                      dataElements.data.push(nodeToUpdate);
+                    }
+                  }
+
+                }
+
+              }
+
+
+
               await handleWebhookUpdate({
                 nodeToUpdate,
                 actions,
@@ -185,16 +248,16 @@ exports.sourceNodes = async ({
                 store
               }, pluginOptions);
             }
+
           }
         }
-
+        fs.writeFileSync('./allData.txt', JSON.stringify(arrayElements));
         setPluginStatus({
           lastFetched: data.data.timestamp
         });
       }
     } catch (e) {
       gracefullyRethrow(drupalFetchIncrementalActivity, e);
-      return;
     }
 
     drupalFetchIncrementalActivity.end();
@@ -225,81 +288,84 @@ exports.sourceNodes = async ({
     });
     let round = [];
     let roundM = 0;
-    allData = await Promise.all(_.map(data.data.links, async (url, type) => {
-      roundM++;
-      await new Promise(resolve => setTimeout(resolve, roundM*2000));
-      if (disallowedLinkTypes.includes(type)) return;
-      if (!url) return;
-      if (!type) return;
-      console.log("correr: ", url);
-      if (!round[url.href]) {
-        round[url.href] = 0;
-      }
-      
-      const getNext = async (url, data = []) => {
-        let urlAux = url.href.split("?")[0];
-        console.log("url splitted is: ", urlAux);
-        console.log("la vuelta es: ", round[urlAux]);
-        round[urlAux]++;
-        if (typeof url === `object`) {
-          // url can be string or object containing href field
-          url = url.href; // Apply any filters configured in gatsby-config.js. Filters
-          // can be any valid JSON API filter query string.
-          // See https://www.drupal.org/docs/8/modules/jsonapi/filtering
+    if (!fetchDrupalFromCache) {
+      console.log("FETCH FROM DRUPAL");
+      allData = await Promise.all(_.map(data.data.links, async (url, type) => {
+        roundM++;
+        if (disallowedLinkTypes.includes(type)) return;
+        if (!url) return;
+        if (!type) return;
+        await new Promise(resolve => setTimeout(resolve, roundM * 1000));
+        if (!round[url.href]) {
+          round[url.href] = 0;
+        }
 
-          if (typeof filters === `object`) {
-            if (filters.hasOwnProperty(type)) {
-              url = url + `?${filters[type]}`;
+        const getNext = async (url, data = []) => {
+          let urlAux = url.href.split("?")[0];
+          round[urlAux]++;
+          if (typeof url === `object`) {
+            url = url.href; // Apply any filters configured in gatsby-config.js. Filters
+            // can be any valid JSON API filter query string.
+            // See https://www.drupal.org/docs/8/modules/jsonapi/filtering
+
+            if (typeof filters === `object`) {
+              if (filters.hasOwnProperty(type)) {
+                url = url + `?${filters[type]}`;
+              }
             }
           }
-        }
 
-        let d;
+          let d;
 
-        try {
-          d = await axios.get(url, {
-            headers,
-            params
-          });
-        } catch (error) {
-          if (error.response && error.response.status == 405) {
-            // The endpoint doesn't support the GET method, so just skip it.
-            return [];
-          } else {
-            console.error(`Failed to fetch ${url}`, error.message);
-            console.log(error.data);
-            throw error;
+          try {
+            d = await axios.get(url, {
+              headers,
+              params
+            });
+          } catch (error) {
+            if (error.response && error.response.status == 405) {
+              // The endpoint doesn't support the GET method, so just skip it.
+              return [];
+            } else {
+              console.error(`Failed to fetch ${url}`, error.message);
+              console.log(error.data);
+              throw error;
+            }
           }
-        }
-       
-        data = data.concat(d.data.data); // Add support for includes. Includes allow entity data to be expanded
-        // based on relationships. The expanded data is exposed as `included`
-        // in the JSON API response.
-        // See https://www.drupal.org/docs/8/modules/jsonapi/includes
-        //console.log("imported data is");
-        //console.log(data);
-        if (d.data.included) {
-          data = data.concat(d.data.included);
-        }
 
-        if (d.data.links && d.data.links.next && round[urlAux] < 2) {
-          //round++;
-          console.log("fetching", d.data.links.next);
-          await new Promise(resolve2 => setTimeout(resolve2, 700));
-          data = await getNext(d.data.links.next, data);
-        }
+          data = data.concat(d.data.data); // Add support for includes. Includes allow entity data to be expanded
+          // based on relationships. The expanded data is exposed as `included`
+          // in the JSON API response.
+          // See https://www.drupal.org/docs/8/modules/jsonapi/includes
+          if (d.data.included) {
+            data = data.concat(d.data.included);
+          }
 
-        return data;
-      };
+          if (d.data.links && d.data.links.next && ((round[urlAux] < 100 && demoImport) || !demoImport)) {
+            console.log("fetching", d.data.links.next);
+            await new Promise(resolve2 => setTimeout(resolve2, 700));
+            data = await getNext(d.data.links.next, data);
+          }
 
-      const data = await getNext(url);
-      const result = {
-        type,
-        data
-      }; // eslint-disable-next-line consistent-return
+          return data;
+        };
 
-      return result;
-    }));
+        const data = await getNext(url);
+        const result = {
+          type,
+          data
+        }; // eslint-disable-next-line consistent-return
+
+        return result;
+      }));
+    } else {
+      console.log("FETCH DRUPAL FROM CACHE FILE");
+      const fileContent = fs.readFileSync('./allData.txt');
+      const array = JSON.parse(fileContent);
+
+      allData = array;
+
+    }
   } catch (e) {
     gracefullyRethrow(drupalFetchActivity, e);
     return;
@@ -307,6 +373,8 @@ exports.sourceNodes = async ({
 
   drupalFetchActivity.end();
   const nodes = new Map(); // first pass - create basic nodes
+
+  fs.writeFileSync('./allData.txt', JSON.stringify(allData));
 
   _.each(allData, contentType => {
     if (!contentType) return;
